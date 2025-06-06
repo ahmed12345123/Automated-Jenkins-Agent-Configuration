@@ -1,0 +1,74 @@
+---
+- name: Install Docker and deploy Jenkins container
+  hosts: all
+  become: yes
+
+  vars:
+    venv_path: /opt/ansible_venv
+
+  tasks:
+
+    - name: Install required system packages
+      yum:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - docker
+        state: present
+
+    - name: Enable and start Docker service
+      systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Add ec2-user to docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Create Python virtual environment
+      command: python3 -m venv {{ venv_path }}
+      args:
+        creates: "{{ venv_path }}/bin/activate"
+
+    - name: Install Python packages in virtual environment
+      pip:
+        name:
+          - "urllib3<2"
+          - requests
+          - docker
+        virtualenv: "{{ venv_path }}"
+        virtualenv_command: python3 -m venv
+        virtualenv_python: python3
+
+    - name: Set ansible_python_interpreter to venv Python
+      set_fact:
+        ansible_python_interpreter: "{{ venv_path }}/bin/python"
+
+    - name: Pull official Jenkins Docker image
+      community.docker.docker_image:
+        name: jenkins/jenkins:lts
+        source: pull
+
+    - name: Create Jenkins home directory
+      file:
+        path: /var/jenkins_home
+        state: directory
+        owner: 1000
+        group: 1000
+        mode: '0755'
+
+    - name: Run Jenkins container
+      community.docker.docker_container:
+        name: jenkins
+        image: jenkins/jenkins:lts
+        state: started
+        restart_policy: unless-stopped
+        published_ports:
+          - "8080:8080"
+          - "50000:50000"
+        volumes:
+          - /var/jenkins_home:/var/jenkins_home
